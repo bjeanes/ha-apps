@@ -73,6 +73,20 @@ When `true`, the screen ignores all keyboard and pointer input. This is enforced
 by the VNC server itself, so it applies to every viewer — noVNC and native VNC
 clients alike, on every port. Defaults to `false`.
 
+#### Option: `screens[].hide_cursor`
+
+A touch client has no pointer of its own, so a tap moves the remote cursor to
+wherever you tapped and leaves it sitting there. Defaults to `true`: the
+pointer disappears two seconds after it stops moving, and comes straight back
+when it moves again.
+
+The screen also starts with no pointer at all, so one that is never touched
+never shows one.
+
+This happens on the X server, so it applies to every viewer of that screen —
+noVNC and native VNC clients alike. Set it to `false` for a screen you drive
+with a mouse and want the pointer always visible.
+
 #### Option: `screens[].show_controls`
 
 noVNC draws its own toolbar — a small tab at the left edge that opens a panel

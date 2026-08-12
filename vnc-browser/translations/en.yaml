@@ -6,6 +6,11 @@ configuration:
       instance, VNC server and noVNC server. Screen 1 uses ports 5901 (VNC) and
       6901 (noVNC), screen 2 uses 5902 and 6902, and so on. Publish only the
       ports a device actually needs, so it can be firewalled to its own screen.
+  hide_cursor:
+    name: Hide the mouse pointer
+    description: >-
+      Hide the pointer two seconds after it stops moving, so a tap on a touch
+      screen does not leave a cursor behind. Enabled by default.
   show_controls:
     name: Show noVNC controls
     description: >-

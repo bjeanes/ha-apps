@@ -1,6 +1,6 @@
 # https://developers.home-assistant.io/docs/apps/configuration#app-configuration
 name: VNC Browser
-version: "0.2.0"
+version: "0.3.0"
 slug: vnc-browser
 description: Kiosk browser screens, each with its own URL, resolution, Chromium flags and dedicated noVNC port
 url: "https://github.com/bjeanes/ha-apps/tree/main/vnc-browser"
@@ -69,6 +69,7 @@ schema:
       depth: list(16|24|32)?
       view_only: bool?
       show_controls: bool?
+      hide_cursor: bool?
       browser_args: str?
   vnc_password: password?
   log_level: list(trace|debug|info|notice|warning|error|fatal)?

@@ -23,6 +23,7 @@ RUN \
         supervisor \
         tigervnc \
         ttf-dejavu \
+        unclutter-xfixes \
         websockify \
         xset \
     \

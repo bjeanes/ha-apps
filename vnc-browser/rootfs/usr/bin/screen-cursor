@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Hides the pointer on one screen once it stops moving.
+#
+# A touch client has no pointer of its own: tapping moves the remote cursor to
+# wherever you tapped and leaves it sitting there. unclutter-xfixes hides it
+# through the XFIXES extension, so it disappears for every viewer of this
+# screen, noVNC and native VNC clients alike, and comes straight back as soon
+# as the pointer moves again.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+
+exec with-display "${number}" unclutter-xfixes \
+    --timeout 2 \
+    `# ignore sub-pixel drift, which would otherwise keep it visible` \
+    --jitter 2 \
+    `# scrolling is not pointer movement, so it should not reveal it` \
+    --ignore-scrolling \
+    `# a screen nobody has touched yet should not show one either` \
+    --start-hidden

@@ -159,7 +159,7 @@ vnc_password() {
 render_screen() {
     local number="${1}"
     local screen="${2}"
-    local name url resolution depth view_only browser_args show_controls
+    local name url resolution depth view_only browser_args show_controls hide_cursor
     local width height vnc_port novnc_port slug web_root
 
     name=$(jq -r '.name // empty' <<<"${screen}")
@@ -169,6 +169,8 @@ render_screen() {
     view_only=$(jq -r 'if .view_only then "true" else "false" end' <<<"${screen}")
     browser_args=$(jq -r '.browser_args // ""' <<<"${screen}")
     show_controls=$(jq -r 'if .show_controls then "true" else "false" end' <<<"${screen}")
+    # Defaults to true when the key is absent, unlike the flags above.
+    hide_cursor=$(jq -r 'if has("hide_cursor") then (if .hide_cursor then "true" else "false" end) else "true" end' <<<"${screen}")
 
     [[ -z "${name}" ]] && name="Screen ${number}"
 
@@ -224,6 +226,9 @@ render_screen() {
 
     program "screen${number}-xvnc" 10 "/usr/bin/screen-xvnc" "${number}"
     program "screen${number}-wm" 20 "/usr/bin/screen-wm" "${number}"
+    if [[ "${hide_cursor}" == "true" ]]; then
+        program "screen${number}-cursor" 25 "/usr/bin/screen-cursor" "${number}"
+    fi
     program "screen${number}-browser" 30 "/usr/bin/screen-browser" "${number}"
     program "screen${number}-novnc" 40 "/usr/bin/screen-novnc" "${number}"
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- Hide the mouse pointer two seconds after it stops moving, and start each
+  screen with no pointer at all. A touch client has no pointer of its own, so
+  a tap would otherwise strand a cursor wherever it landed. It reappears as
+  soon as the pointer moves, and `hide_cursor: false` keeps it visible on a
+  screen you drive with a mouse.
+
+  This is done on the X server, so it applies to every viewer of a screen —
+  noVNC and native VNC clients alike.
+
 ## 0.2.0
 
 - Fix screens after the first showing nothing. When several X servers start at
