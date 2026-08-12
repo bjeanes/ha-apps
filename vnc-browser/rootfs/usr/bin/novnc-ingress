@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# The aggregate noVNC server behind Home Assistant Ingress, which can reach
+# every screen so the picker can offer all of them on one page.
+#
+# Home Assistant gives an add-on a single ingress port, so screens are
+# multiplexed here by token. This port is never published; devices that should
+# only see one screen use that screen's own port instead (see screen-novnc).
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# shellcheck source=/dev/null
+source "/var/run/vnc-browser/global.env"
+
+# See screen-novnc: a bare port listens on IPv4 only.
+exec websockify \
+    --web "${INGRESS_WEB_ROOT}" \
+    --token-plugin TokenFile \
+    --token-source "${NOVNC_TOKEN_DIR}" \
+    --heartbeat 30 \
+    "[::]:${INGRESS_PORT}"

@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# X server + VNC server for one screen. TigerVNC's Xvnc is both, so a screen
+# needs exactly one of these and no separate Xvfb.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+# shellcheck source=/dev/null
+source "/var/run/vnc-browser/screen${number}.env"
+# shellcheck source=/dev/null
+source "/var/run/vnc-browser/global.env"
+
+declare -a args=(
+    ":${SCREEN_NUMBER}"
+    -geometry "${SCREEN_WIDTH}x${SCREEN_HEIGHT}"
+    -depth "${SCREEN_DEPTH}"
+    -rfbport "${SCREEN_VNC_PORT}"
+    -desktop "${SCREEN_NAME}"
+    -AlwaysShared=1
+    -localhost=0
+    -SecurityTypes "${VNC_SECURITY_TYPES}"
+    # Never blank: these are kiosk displays that should always show something.
+    -s 0
+)
+
+if [[ "${VNC_SECURITY_TYPES}" == "VncAuth" ]]; then
+    args+=(-rfbauth "${VNC_PASSWD_FILE}")
+fi
+
+# Enforced server side so it also applies to raw VNC clients, not just noVNC.
+if [[ "${SCREEN_VIEW_ONLY}" == "true" ]]; then
+    args+=(-AcceptKeyEvents=0 -AcceptPointerEvents=0 -AcceptCutText=0)
+fi
+
+# Xvnc leaves a stale lock behind if the container was killed uncleanly.
+rm -f "/tmp/.X${SCREEN_NUMBER}-lock" "/tmp/.X11-unix/X${SCREEN_NUMBER}"
+
+Xvnc "${args[@]}" 2>&1 | quiet-log

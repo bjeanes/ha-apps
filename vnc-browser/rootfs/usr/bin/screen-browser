@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Chromium in kiosk mode for one screen, using a per-screen profile under /data
+# so logins and site data survive restarts.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+# shellcheck source=/dev/null
+source "/var/run/vnc-browser/screen${number}.env"
+
+mkdir -p "${SCREEN_PROFILE}/Default"
+
+# Chromium locks a profile against concurrent use by symlinking SingletonLock
+# to "<hostname>-<pid>". That lock outlives an unclean stop, and because the
+# container gets a new hostname every start, Chromium would then refuse to open
+# its own profile forever. Supervisor guarantees a single browser per profile,
+# so clearing the lock immediately before launching is always correct here.
+rm -f \
+    "${SCREEN_PROFILE}/SingletonLock" \
+    "${SCREEN_PROFILE}/SingletonCookie" \
+    "${SCREEN_PROFILE}/SingletonSocket"
+
+# A hard container stop also looks like a crash to Chromium, which then opens
+# the next session with a "restore pages?" bubble sitting over the dashboard.
+readonly preferences="${SCREEN_PROFILE}/Default/Preferences"
+if [[ -f "${preferences}" ]]; then
+    sed -i \
+        -e 's/"exit_type":"[^"]*"/"exit_type":"Normal"/' \
+        -e 's/"exited_cleanly":false/"exited_cleanly":true/' \
+        "${preferences}"
+fi
+
+# shellcheck disable=SC2054  # the commas below belong to Chromium flag values
+declare -a args=(
+    --kiosk
+    --start-fullscreen
+    --window-position=0,0
+    "--window-size=${SCREEN_WIDTH},${SCREEN_HEIGHT}"
+    "--user-data-dir=${SCREEN_PROFILE}"
+    # Chromium refuses to sandbox as root, which is how add-ons run.
+    --no-sandbox
+    --disable-setuid-sandbox
+    # Suppresses the "unsupported command-line flag" bubble the above triggers.
+    --test-type
+    --no-first-run
+    --no-default-browser-check
+    --noerrdialogs
+    --disable-infobars
+    --disable-session-crashed-bubble
+    --disable-features=Translate,TranslateUI
+    --disable-component-update
+    --check-for-update-interval=31536000
+    # /dev/shm is small in containers; without this Chromium tabs crash.
+    --disable-dev-shm-usage
+    --disable-gpu
+    # There is no keyring in the container, so the default store errors out.
+    --password-store=basic
+)
+
+# Splitting with xargs rather than eval keeps quoted values such as
+# --user-agent="..." intact without executing anything from the config.
+declare -a extra_args=()
+if [[ -n "${SCREEN_BROWSER_ARGS}" ]]; then
+    mapfile -t extra_args < <(
+        printf '%s' "${SCREEN_BROWSER_ARGS}" | xargs -n1 printf '%s\n'
+    )
+fi
+
+# Belt and braces alongside Xvnc's "-s 0": never blank the screen.
+# Xvnc has no DPMS extension, so only the screensaver knobs apply here.
+with-display "${number}" xset s off s noblank || true
+
+# dbus-run-session gives this screen its own session bus. Without one,
+# Chromium retries a missing bus repeatedly and floods the log.
+with-display "${number}" \
+    dbus-run-session -- \
+    chromium "${args[@]}" ${extra_args[@]+"${extra_args[@]}"} "${SCREEN_URL}" 2>&1 | quiet-log

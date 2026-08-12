@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Drops a narrow, known-benign set of lines from a program's output.
+#
+# Xvnc, openbox and Chromium each complain at startup about facilities a
+# container does not have and a kiosk does not need. None of it is actionable,
+# and all of it lands in the user's app log looking like breakage. Only the
+# patterns below are removed; everything else passes through untouched.
+#
+# Set the app's log level to debug or trace to see the raw output instead.
+#
+# Implemented with awk rather than grep: the image has BusyBox grep, which does
+# not understand --line-buffered and would exit immediately, taking every line
+# of the program's output with it.
+# ==============================================================================
+set -o nounset
+
+# Extended regular expressions, one per line with the reason it is safe to
+# drop. Avoid backslashes: these are passed to awk via -v, which would consume
+# them as string escapes.
+readonly patterns=(
+    # The X keymap has duplicate symbols for a few function keys. xkbcomp says
+    # so, then carries on; the X server itself prints that it is not fatal.
+    'xkbcomp'
+    'Warning:[[:space:]]+(Multiple symbols|Symbol map)'
+    'Using (last definition|F[0-9]+, ignoring)'
+    'Errors from xkbcomp are not fatal'
+    # Internal X event-queue bookkeeping during startup.
+    'mieq: warning: overriding existing handler'
+    # There are no physical monitors to span, so openbox has no use for it.
+    'Xinerama extension is not present'
+    # Chromium pushes to Google Cloud Messaging, which a kiosk never receives.
+    'google_apis/gcm'
+    'Registration response error message'
+    # Chromium probes for desktop services (battery, notifications) that a
+    # container has no reason to provide.
+    'dbus/(bus|object_proxy)[.]cc'
+    # Routine bus bookkeeping as Chromium asks for the accessibility service.
+    'dbus-daemon.*(Activating service|Successfully activated service)'
+)
+
+level=$(jq -r '.log_level // "info"' /data/options.json 2>/dev/null || echo "info")
+case "${level}" in
+    debug | trace | all)
+        exec cat
+        ;;
+esac
+
+exec awk -v re="$(
+    IFS='|'
+    printf '%s' "${patterns[*]}"
+)" '$0 !~ re { print; fflush() }'

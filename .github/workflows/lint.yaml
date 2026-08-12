@@ -89,35 +89,45 @@ jobs:
       - name: 🚀 Run YAMLLint
         uses: frenck/action-yamllint@34b4bbcaeabedcfefad6adea8c5bbc42af0e2d47 # v1.5.0
 
-  lint-image-key:
-    name: App image key present
+  lint-config-keys:
+    name: App config keys intact
     runs-on: ubuntu-latest
     needs: find
     steps:
       - name: ⤵️ Check out code from GitHub
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Supervisor builds an app from source when config.yaml has no "image"
-      # key, which is exactly what you want while developing in the
-      # devcontainer, and exactly what you do not want on main: published apps
-      # must pull a prebuilt image. This catches a commented-out image key
-      # before it ships.
-      - name: 🔍 Check every app declares an image
+      # Developing locally means commenting keys out of config.yaml — "image"
+      # so Supervisor builds from the working tree instead of pulling. It is
+      # easy to comment out a neighbouring line by accident, and the result is
+      # a silent behaviour change rather than an error: a missing "init: false"
+      # simply reverts to the schema default of true, and s6-overlay then dies
+      # with "can only run as pid 1". This catches both before they ship.
+      - name: 🔍 Check config keys are present and uncommented
         env:
           APPS: ${{ needs.find.outputs.apps }}
         run: |
-          missing=()
+          # Keys whose absence changes runtime behaviour silently.
+          watched='name|version|slug|arch|init|image|ingress|ports|schema|options|map'
+          failed=0
+
           for app in $(jq -r '.[]' <<< "${APPS}"); do
-            if ! grep -qE '^image:[[:space:]]*\S' "${app}/config.yaml"; then
-              missing+=("${app}")
+            config="${app}/config.yaml"
+
+            if ! grep -qE '^image:[[:space:]]*\S' "${config}"; then
+              echo "::error file=${config}::Missing 'image:'. Uncomment it before merging;"
+              echo "  without it Supervisor rebuilds the app on every user's machine."
+              failed=1
             fi
+
+            while IFS= read -r hit; do
+              echo "::error file=${config},line=${hit%%:*}::Commented-out config key: ${hit#*:}"
+              failed=1
+            done < <(grep -nE "^#[[:space:]]*(${watched}):" "${config}" || true)
           done
 
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::Missing 'image:' in config.yaml for: ${missing[*]}"
-            echo "Uncomment the image key before merging; without it Supervisor"
-            echo "builds the app from source on every user's machine."
+          if [[ ${failed} -ne 0 ]]; then
             exit 1
           fi
 
-          echo "All apps declare an image."
+          echo "All app config keys present and uncommented."

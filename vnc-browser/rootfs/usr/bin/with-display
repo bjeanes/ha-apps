@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Run a command against a screen's X display, once that display is accepting
+# connections. Supervisor starts programs in priority order but does not wait
+# for readiness, so everything downstream of Xvnc goes through here.
+#
+# Usage: with-display <screen-number> <command> [args...]
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+shift
+
+export DISPLAY=":${number}"
+
+declare -i waited=0
+until [[ -S "/tmp/.X11-unix/X${number}" ]]; do
+    if [[ "${waited}" -ge 600 ]]; then
+        echo "Timed out waiting for display ${DISPLAY}" >&2
+        exit 1
+    fi
+    sleep 0.1
+    waited+=1
+done
+
+exec "${@}"

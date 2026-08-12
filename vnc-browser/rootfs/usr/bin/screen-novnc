@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# This screen's own noVNC server, on its own port.
+#
+# The VNC target is fixed on the command line and no token plugin is loaded, so
+# a client that reaches this port can only ever reach this screen: there is no
+# parameter it could supply to be routed somewhere else. That is what makes it
+# safe to firewall a device to exactly one screen.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+# shellcheck source=/dev/null
+source "/var/run/vnc-browser/screen${number}.env"
+
+# Bind "[::]" rather than bare port: given only a port, websockify listens on
+# IPv4 alone. Docker publishes both families, so an IPv6 client would reach the
+# proxy, find nothing listening behind it, and get an empty reply. The kernel
+# has bindv6only=0, so one IPv6 socket serves IPv4 clients as well.
+exec websockify \
+    --web "${SCREEN_WEB_ROOT}" \
+    --heartbeat 30 \
+    "[::]:${SCREEN_NOVNC_PORT}" \
+    "localhost:${SCREEN_VNC_PORT}"

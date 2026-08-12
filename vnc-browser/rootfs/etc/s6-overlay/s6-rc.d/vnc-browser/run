@@ -1,0 +1,12 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Render the runtime configuration from the add-on options, then hand over to
+# supervisord which owns the per-screen process trees.
+# ==============================================================================
+declare -r supervisord_conf="/etc/supervisor/supervisord.conf"
+
+vnc-browser-config || bashio::exit.nok "Could not generate the screen configuration"
+
+bashio::log.info "Starting screens..."
+exec supervisord --nodaemon --configuration "${supervisord_conf}"

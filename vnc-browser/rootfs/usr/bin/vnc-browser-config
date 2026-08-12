@@ -1,0 +1,422 @@
+#!/usr/bin/env bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Renders /data/options.json into everything the runtime needs:
+#
+#   - one env file per screen, sourced by the screen-* wrappers
+#   - one supervisor program group per screen (Xvnc, openbox, chromium, noVNC)
+#   - a private noVNC web root per screen, so a device pointed at one screen's
+#     port cannot reach any other screen
+#   - an aggregate noVNC web root and token file for the Ingress picker
+#
+# All user supplied values land in the env files rather than in the supervisor
+# config, so nothing the user types has to survive supervisor's own %-based
+# string interpolation or its shlex command parsing.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly OPTIONS_FILE="/data/options.json"
+readonly RUN_DIR="/var/run/vnc-browser"
+readonly TOKEN_DIR="${RUN_DIR}/tokens"
+readonly WEB_DIR="${RUN_DIR}/web"
+readonly CONF_DIR="/etc/supervisor/conf.d"
+readonly NOVNC_DIST="/opt/novnc"
+readonly PROFILE_ROOT="/data/chromium"
+readonly PASSWD_FILE="${RUN_DIR}/vncpasswd"
+readonly FIRST_VNC_PORT=5900
+readonly FIRST_NOVNC_PORT=6900
+# Must match the ports declared in config.yaml. Home Assistant drops mappings
+# for undeclared ports, so screens past this get Ingress access only.
+readonly PUBLISHABLE_SCREENS=8
+
+# Emit a supervisor program block.
+# Usage: program <name> <priority> <command...>
+program() {
+    local name="${1}"
+    local priority="${2}"
+    shift 2
+
+    cat >>"${CONF_DIR}/screens.conf" <<EOF
+
+[program:${name}]
+command=${*}
+priority=${priority}
+autorestart=true
+startretries=1000
+stopasgroup=true
+killasgroup=true
+stdout_logfile=/dev/fd/1
+stdout_logfile_maxbytes=0
+redirect_stderr=true
+EOF
+}
+
+# Build a noVNC web root: the upstream distribution linked in, plus our own
+# index.html. Each root is separate so every entry point can have its own
+# landing page while sharing one copy of noVNC.
+novnc_web_root() {
+    local dir="${1}"
+    local hide_controls="${2:-false}"
+    local entry
+
+    mkdir -p "${dir}"
+    for entry in "${NOVNC_DIST}"/*; do
+        ln -sfn "${entry}" "${dir}/$(basename "${entry}")"
+    done
+
+    [[ "${hide_controls}" != "true" ]] && return 0
+
+    # noVNC offers no setting for this, so the toolbar is hidden with a
+    # stylesheet of our own. vnc.html stops being a symlink and becomes a copy
+    # with one extra <link>; everything else still comes from upstream, so the
+    # session, reconnect handling and scaling are untouched.
+    cat >"${dir}/kiosk.css" <<'CSS'
+/* Hide noVNC's toolbar and the hint that advertises it. */
+#noVNC_control_bar_anchor,
+#noVNC_hint_anchor {
+    display: none !important;
+}
+CSS
+    rm -f "${dir}/vnc.html"
+    sed 's|</head>|<link rel="stylesheet" href="kiosk.css"></head>|' \
+        "${NOVNC_DIST}/vnc.html" >"${dir}/vnc.html"
+}
+
+main() {
+    rm -rf "${RUN_DIR}"
+    mkdir -p "${RUN_DIR}" "${TOKEN_DIR}" "${WEB_DIR}" "${CONF_DIR}" "${PROFILE_ROOT}"
+    # Chromium looks for a system bus whether or not anything answers it.
+    mkdir -p /run/dbus
+    rm -f "${CONF_DIR}"/*.conf /run/dbus/pid
+
+    if [[ "$(jq '.screens | length? // 0' "${OPTIONS_FILE}")" -eq 0 ]]; then
+        bashio::log.fatal "No screens configured; add at least one screen."
+        return 1
+    fi
+
+    # -- VNC authentication ----------------------------------------------------
+    local password security_types="None"
+    password=$(vnc_password)
+    if [[ -n "${password}" ]]; then
+        printf '%s' "${password}" | vncpasswd -f >"${PASSWD_FILE}"
+        chmod 600 "${PASSWD_FILE}"
+        security_types="VncAuth"
+        bashio::log.info "VNC authentication enabled"
+    else
+        bashio::log.info "VNC authentication disabled (no password set)"
+    fi
+
+    cat >"${RUN_DIR}/global.env" <<EOF
+VNC_SECURITY_TYPES=${security_types}
+VNC_PASSWD_FILE=${PASSWD_FILE}
+INGRESS_WEB_ROOT=${WEB_DIR}/ingress
+INGRESS_PORT=8099
+NOVNC_TOKEN_DIR=${TOKEN_DIR}
+EOF
+
+    # Started before the screens so a browser never races a missing bus.
+    program "dbus" 1 "/usr/bin/dbus-daemon" --system --nofork --nopidfile
+
+    # -- Per screen ------------------------------------------------------------
+    local -a screens=()
+    local -a nav=()
+    local screen index number
+
+    mapfile -t screens < <(jq -c '.screens[]' "${OPTIONS_FILE}")
+
+    index=0
+    for screen in "${screens[@]}"; do
+        number=$((index + 1))
+        render_screen "${number}" "${screen}"
+        nav+=("$(nav_entry "${number}" "${screen}")")
+        index=$((index + 1))
+    done
+
+    if [[ "${#screens[@]}" -gt "${PUBLISHABLE_SCREENS}" ]]; then
+        bashio::log.warning \
+            "Only screens 1-${PUBLISHABLE_SCREENS} have publishable ports;" \
+            "screens $((PUBLISHABLE_SCREENS + 1)) and up are reachable through" \
+            "the Web UI and the internal network only."
+    fi
+
+    # -- Ingress picker --------------------------------------------------------
+    novnc_web_root "${WEB_DIR}/ingress"
+    render_picker "${WEB_DIR}/ingress/index.html" "${nav[@]}"
+    program "novnc-ingress" 5 "/usr/bin/novnc-ingress"
+
+    bashio::log.info "Configured ${#screens[@]} screen(s)"
+}
+
+# Options are read straight from the file rather than through bashio::config,
+# which proxies the Supervisor API and so fails outside a live Supervisor.
+vnc_password() {
+    jq -r '.vnc_password // "" | select(. != null)' "${OPTIONS_FILE}"
+}
+
+# Render one screen: env file, web root, supervisor programs, ingress token.
+render_screen() {
+    local number="${1}"
+    local screen="${2}"
+    local name url resolution depth view_only browser_args show_controls
+    local width height vnc_port novnc_port slug web_root
+
+    name=$(jq -r '.name // empty' <<<"${screen}")
+    url=$(jq -r '.url' <<<"${screen}")
+    resolution=$(jq -r '.resolution // "1280x800"' <<<"${screen}")
+    depth=$(jq -r '.depth // 24' <<<"${screen}")
+    view_only=$(jq -r 'if .view_only then "true" else "false" end' <<<"${screen}")
+    browser_args=$(jq -r '.browser_args // ""' <<<"${screen}")
+    show_controls=$(jq -r 'if .show_controls then "true" else "false" end' <<<"${screen}")
+
+    [[ -z "${name}" ]] && name="Screen ${number}"
+
+    if ! [[ "${resolution}" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+        bashio::log.fatal "Screen ${number} has an invalid resolution: ${resolution}"
+        return 1
+    fi
+    width="${BASH_REMATCH[1]}"
+    height="${BASH_REMATCH[2]}"
+
+    vnc_port=$((FIRST_VNC_PORT + number))
+    novnc_port=$((FIRST_NOVNC_PORT + number))
+    slug=$(slugify "${name}")
+    web_root="${WEB_DIR}/screen${number}"
+
+    # Every value is shell quoted by jq's @sh, so quoting in the user's values
+    # survives being sourced by the wrappers.
+    jq -r -n --arg name "${name}" \
+          --arg url "${url}" \
+          --arg width "${width}" \
+          --arg height "${height}" \
+          --arg depth "${depth}" \
+          --arg view_only "${view_only}" \
+          --arg browser_args "${browser_args}" \
+          --arg vnc_port "${vnc_port}" \
+          --arg novnc_port "${novnc_port}" \
+          --arg web_root "${web_root}" \
+          --arg profile "${PROFILE_ROOT}/screen${number}" \
+          --arg number "${number}" \
+          '[
+            "SCREEN_NUMBER=" + ($number | @sh),
+            "SCREEN_NAME=" + ($name | @sh),
+            "SCREEN_URL=" + ($url | @sh),
+            "SCREEN_WIDTH=" + ($width | @sh),
+            "SCREEN_HEIGHT=" + ($height | @sh),
+            "SCREEN_DEPTH=" + ($depth | @sh),
+            "SCREEN_VIEW_ONLY=" + ($view_only | @sh),
+            "SCREEN_BROWSER_ARGS=" + ($browser_args | @sh),
+            "SCREEN_VNC_PORT=" + ($vnc_port | @sh),
+            "SCREEN_NOVNC_PORT=" + ($novnc_port | @sh),
+            "SCREEN_WEB_ROOT=" + ($web_root | @sh),
+            "SCREEN_PROFILE=" + ($profile | @sh)
+          ] | join("\n")' >"${RUN_DIR}/screen${number}.env"
+
+    # A device pointed at this screen is a kiosk, so noVNC's own toolbar is
+    # hidden unless the screen asks for it. The Web UI always keeps it.
+    if [[ "${show_controls}" == "true" ]]; then
+        novnc_web_root "${web_root}"
+    else
+        novnc_web_root "${web_root}" "true"
+    fi
+    render_screen_index "${web_root}/index.html" "${name}" "${view_only}"
+
+    program "screen${number}-xvnc" 10 "/usr/bin/screen-xvnc" "${number}"
+    program "screen${number}-wm" 20 "/usr/bin/screen-wm" "${number}"
+    program "screen${number}-browser" 30 "/usr/bin/screen-browser" "${number}"
+    program "screen${number}-novnc" 40 "/usr/bin/screen-novnc" "${number}"
+
+    # Tokens are only used by the Ingress picker. The per-screen servers have a
+    # fixed target and ignore tokens entirely.
+    {
+        echo "screen${number}: localhost:${vnc_port}"
+        [[ -n "${slug}" && "${slug}" != "screen${number}" ]] \
+            && echo "${slug}: localhost:${vnc_port}"
+    } >>"${TOKEN_DIR}/screens"
+
+    bashio::log.info \
+        "Screen ${number} (${name}): ${width}x${height}x${depth}" \
+        "| noVNC :${novnc_port} | VNC :${vnc_port} | ${url}"
+}
+
+# Lowercase, non-alphanumerics collapsed to dashes.
+slugify() {
+    printf '%s' "${1}" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -e 's/[^a-z0-9]\+/-/g' -e 's/^-//' -e 's/-$//'
+}
+
+# The landing page on a screen's own port. It goes straight to that screen, and
+# forwards any query parameters to noVNC, which is what makes
+# "http://host:6901/?password=..." connect without prompting while a bare
+# "http://host:6901/" leaves noVNC to ask for the password.
+render_screen_index() {
+    local out="${1}"
+    local name="${2}"
+    local view_only="${3}"
+    local title
+
+    title=$(jq -r -n --arg n "${name}" '$n | @html')
+
+    cat >"${out}" <<EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>${title}</title>
+</head>
+<body>
+<script>
+  var target = {
+    autoconnect: '1',
+    resize: 'scale',
+    reconnect: '1',
+    reconnect_delay: '2000',
+    path: 'websockify'$( [[ "${view_only}" == "true" ]] && printf ",\n    view_only: '1'" )
+  };
+
+  // Anything supplied by the caller wins, so a URL carrying ?password=... (or
+  // any other noVNC setting) is simply passed through.
+  var incoming = location.search.replace(/^\?/, '').split('&');
+  for (var i = 0; i < incoming.length; i++) {
+    if (!incoming[i]) continue;
+    var pair = incoming[i].split('=');
+    target[decodeURIComponent(pair[0])] =
+      decodeURIComponent(pair.slice(1).join('=') || '');
+  }
+
+  var query = [];
+  for (var key in target) {
+    query.push(encodeURIComponent(key) + '=' + encodeURIComponent(target[key]));
+  }
+  location.replace('vnc.html?' + query.join('&'));
+</script>
+<noscript><a href="vnc.html?autoconnect=1&amp;resize=scale">Connect</a></noscript>
+</body>
+</html>
+EOF
+}
+
+# One JSON object describing a screen, for the Ingress picker.
+nav_entry() {
+    local number="${1}"
+    local screen="${2}"
+    local password
+
+    password=$(vnc_password)
+
+    jq -c -n \
+        --arg number "${number}" \
+        --arg name "$(jq -r --arg d "Screen ${number}" '.name // $d | select(. != "") // $d' <<<"${screen}")" \
+        --arg url "$(jq -r '.url' <<<"${screen}")" \
+        --arg resolution "$(jq -r '.resolution // "1280x800"' <<<"${screen}")" \
+        --argjson view_only "$(jq -c 'if .view_only then true else false end' <<<"${screen}")" \
+        --arg password "${password}" \
+        '{
+            name: $name,
+            url: $url,
+            resolution: $resolution,
+            href: ("vnc.html?path=" + ("websockify?token=screen" + $number | @uri)
+                   + "&autoconnect=1&resize=scale&reconnect=1&reconnect_delay=2000"
+                   + (if $view_only then "&view_only=1" else "" end)
+                   + (if $password == "" then "" else "&password=" + ($password | @uri) end))
+        }'
+}
+
+# The Ingress landing page. Home Assistant gives an app a single ingress entry,
+# so this keeps a screen switcher alongside the viewer rather than sending the
+# browser off into noVNC with no way back to the other screens.
+render_picker() {
+    local out="${1}"
+    shift
+    local -a entries=("${@}")
+    local screens_json
+
+    screens_json=$(printf '%s\n' "${entries[@]}" | jq -s -c '.')
+
+    cat >"${out}" <<EOF
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Screens</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8; --fg: #17191c; --muted: #61666e;
+    --bar: #ffffff; --border: #dfe2e7; --accent: #03a9f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111417; --fg: #e9eaec; --muted: #9aa0a8;
+      --bar: #1c2126; --border: #2b3138;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; display: flex; flex-direction: column;
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  #bar {
+    display: flex; gap: .4rem; padding: .45rem .6rem; flex: 0 0 auto;
+    background: var(--bar); border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  #bar button {
+    flex: 0 0 auto; padding: .35rem .75rem; font: inherit; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: transparent; color: var(--fg);
+  }
+  #bar button:hover { border-color: var(--accent); }
+  #bar button[aria-current="true"] {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  iframe { flex: 1 1 auto; width: 100%; border: 0; display: block; background: #000; }
+</style>
+</head>
+<body>
+<nav id="bar" hidden aria-label="Screens"></nav>
+<iframe id="view" title="Screen" allow="fullscreen; clipboard-read; clipboard-write"></iframe>
+<script>
+  const screens = ${screens_json};
+  const bar = document.getElementById('bar');
+  const view = document.getElementById('view');
+
+  function show(index) {
+    view.src = screens[index].href;
+    for (const button of bar.children) {
+      button.setAttribute('aria-current', String(button.dataset.index === String(index)));
+    }
+    try { localStorage.setItem('vnc-browser.screen', String(index)); } catch (err) { /* private mode */ }
+  }
+
+  screens.forEach(function (screen, index) {
+    const button = document.createElement('button');
+    button.textContent = screen.name;
+    button.dataset.index = index;
+    button.title = screen.url + ' (' + screen.resolution + ')';
+    button.onclick = function () { show(index); };
+    bar.append(button);
+  });
+
+  // With a single screen there is nothing to switch between.
+  if (screens.length > 1) { bar.hidden = false; }
+
+  let start = 0;
+  try {
+    const saved = parseInt(localStorage.getItem('vnc-browser.screen'), 10);
+    if (saved >= 0 && saved < screens.length) { start = saved; }
+  } catch (err) { /* private mode */ }
+  show(start);
+</script>
+</body>
+</html>
+EOF
+}
+
+main "${@}"

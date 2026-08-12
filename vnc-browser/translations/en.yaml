@@ -1,0 +1,40 @@
+configuration:
+  screens:
+    name: Screens
+    description: >-
+      One entry per screen. Each screen gets its own X display, Chromium
+      instance, VNC server and noVNC server. Screen 1 uses ports 5901 (VNC) and
+      6901 (noVNC), screen 2 uses 5902 and 6902, and so on. Publish only the
+      ports a device actually needs, so it can be firewalled to its own screen.
+  show_controls:
+    name: Show noVNC controls
+    description: >-
+      Show noVNC's own toolbar on this screen's port. Hidden by default so a
+      kiosk has nothing to poke at. The Web UI always keeps it.
+  vnc_password:
+    name: VNC password
+    description: >-
+      Optional password for VNC and noVNC connections. Leave empty to disable
+      authentication. A device can skip the prompt by adding "?password=..." to
+      its screen URL, which is useful for kiosks with no keyboard.
+  log_level:
+    name: Log level
+    description: >-
+      Controls the level of log output produced by the app.
+network:
+  5901/tcp: Screen 1 - VNC client
+  5902/tcp: Screen 2 - VNC client
+  5903/tcp: Screen 3 - VNC client
+  5904/tcp: Screen 4 - VNC client
+  5905/tcp: Screen 5 - VNC client
+  5906/tcp: Screen 6 - VNC client
+  5907/tcp: Screen 7 - VNC client
+  5908/tcp: Screen 8 - VNC client
+  6901/tcp: Screen 1 - noVNC, open in a browser
+  6902/tcp: Screen 2 - noVNC, open in a browser
+  6903/tcp: Screen 3 - noVNC, open in a browser
+  6904/tcp: Screen 4 - noVNC, open in a browser
+  6905/tcp: Screen 5 - noVNC, open in a browser
+  6906/tcp: Screen 6 - noVNC, open in a browser
+  6907/tcp: Screen 7 - noVNC, open in a browser
+  6908/tcp: Screen 8 - noVNC, open in a browser

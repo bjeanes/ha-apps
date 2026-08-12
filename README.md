@@ -21,6 +21,15 @@ Web-based PostgreSQL database browser.
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
 
+### [vnc-browser](./vnc-browser)
+
+Kiosk browser screens, each with its own URL, resolution and Chromium flags,
+and each reachable from a plain browser on its own port — so a device can be
+firewalled to exactly the screen it is meant to show.
+
+![Supports aarch64 Architecture][aarch64-shield]
+![Supports amd64 Architecture][amd64-shield]
+
 ## Development
 
 Open this repository in the devcontainer (VS Code will offer to). It runs a
@@ -43,7 +52,36 @@ while developing an app locally, comment `image:` out, or your changes will
 appear to do nothing.
 
 Uncomment it again before committing. CI fails if an app on `main` is missing
-its `image:` key, so a commented-out line cannot ship by accident.
+its `image:` key — or if any other significant key has been commented out — so
+a commented-out line cannot ship by accident.
+
+### Changing `config.yaml`
+
+Supervisor keeps its own copy of an app's configuration, taken when the app was
+installed, and **"Rebuild and Start App" does not refresh it**. Reload the store
+first:
+
+```bash
+ha store reload
+ha apps rebuild --force local_<app>
+```
+
+Skipping the reload rebuilds the image against the old configuration, and it
+fails silently rather than loudly: an omitted key simply reverts to its schema
+default. A missing `init: false` is the one that bites — Supervisor then adds
+Docker's own init, s6-overlay refuses to run as anything but PID 1, and the app
+exits with code 100.
+
+If a change still does not take, uninstall and reinstall. Note that bumping
+`version:` makes `rebuild` refuse outright, because the installed and store
+versions no longer match — update or reinstall instead.
+
+To see what Supervisor actually believes:
+
+```bash
+docker inspect app_local_<app> --format '{{.HostConfig.Init}}'   # want: false
+sudo jq '.system["local_<app>"]' /mnt/supervisor/apps.json
+```
 
 ### Releasing
 

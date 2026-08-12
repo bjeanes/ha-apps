@@ -1,0 +1,75 @@
+# https://developers.home-assistant.io/docs/apps/configuration#app-configuration
+name: VNC Browser
+version: "0.1.0"
+slug: vnc-browser
+description: Kiosk browser screens, each with its own URL, resolution, Chromium flags and dedicated noVNC port
+url: "https://github.com/bjeanes/ha-apps/tree/main/vnc-browser"
+arch:
+  - aarch64
+  - amd64
+# Required: the image runs s6-overlay, which must be PID 1. Leaving this out
+# lets Home Assistant add Docker's own init, and s6 aborts with
+# "s6-overlay-suexec: fatal: can only run as pid 1" and exit code 100.
+init: false
+ingress: true
+# The ingress port is left at its 8099 default; novnc-ingress serves there.
+panel_icon: mdi:monitor-multiple
+panel_title: Screens
+stage: experimental
+# Home Assistant discards port mappings for ports an app does not declare
+# here, so this list is a hard ceiling on direct access: screens 1-8 can be
+# published, and further screens are reachable only through Ingress.
+ports:
+  # Screen 1 is published by default so a fresh install is usable straight
+  # away. Every other screen starts unpublished; set a host port under the
+  # Network settings for each one you actually want reachable.
+  5901/tcp: 5901
+  5902/tcp: null
+  5903/tcp: null
+  5904/tcp: null
+  5905/tcp: null
+  5906/tcp: null
+  5907/tcp: null
+  5908/tcp: null
+  6901/tcp: 6901
+  6902/tcp: null
+  6903/tcp: null
+  6904/tcp: null
+  6905/tcp: null
+  6906/tcp: null
+  6907/tcp: null
+  6908/tcp: null
+ports_description:
+  5901/tcp: "Screen 1 - VNC client"
+  5902/tcp: "Screen 2 - VNC client"
+  5903/tcp: "Screen 3 - VNC client"
+  5904/tcp: "Screen 4 - VNC client"
+  5905/tcp: "Screen 5 - VNC client"
+  5906/tcp: "Screen 6 - VNC client"
+  5907/tcp: "Screen 7 - VNC client"
+  5908/tcp: "Screen 8 - VNC client"
+  6901/tcp: "Screen 1 - noVNC, open in a browser"
+  6902/tcp: "Screen 2 - noVNC, open in a browser"
+  6903/tcp: "Screen 3 - noVNC, open in a browser"
+  6904/tcp: "Screen 4 - noVNC, open in a browser"
+  6905/tcp: "Screen 5 - noVNC, open in a browser"
+  6906/tcp: "Screen 6 - noVNC, open in a browser"
+  6907/tcp: "Screen 7 - noVNC, open in a browser"
+  6908/tcp: "Screen 8 - noVNC, open in a browser"
+options:
+  screens:
+    - name: Home Assistant
+      url: "http://homeassistant/"
+      resolution: "1280x800"
+schema:
+  screens:
+    - name: str?
+      url: url
+      resolution: match(^[0-9]{2,5}x[0-9]{2,5}$)
+      depth: list(16|24|32)?
+      view_only: bool?
+      show_controls: bool?
+      browser_args: str?
+  vnc_password: password?
+  log_level: list(trace|debug|info|notice|warning|error|fatal)?
+image: "ghcr.io/bjeanes/ha-app-vnc-browser"

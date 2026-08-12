@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Window manager for one screen. Chromium runs fullscreen in kiosk mode, but a
+# WM is still needed for it to honour fullscreen requests from the page itself
+# (video, dashboards) and to place dialogs sanely.
+# ==============================================================================
+set -o errexit
+set -o nounset
+set -o pipefail
+
+readonly number="${1}"
+
+with-display "${number}" openbox --sm-disable 2>&1 | quiet-log
