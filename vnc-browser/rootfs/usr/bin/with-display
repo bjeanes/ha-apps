@@ -4,6 +4,13 @@
 # connections. Supervisor starts programs in priority order but does not wait
 # for readiness, so everything downstream of Xvnc goes through here.
 #
+# Readiness is tested by connecting, not by looking for /tmp/.X11-unix/X<n>.
+# That file is not a reliable signal: when several X servers start at once,
+# some end up with only an abstract socket (@/tmp/.X11-unix/X<n>), which
+# clients connect to happily but which never appears in the filesystem. Waiting
+# on the file meant the browser and window manager for such a screen sat here
+# until they timed out, and the screen stayed blank.
+#
 # Usage: with-display <screen-number> <command> [args...]
 # ==============================================================================
 set -o errexit
@@ -16,7 +23,7 @@ shift
 export DISPLAY=":${number}"
 
 declare -i waited=0
-until [[ -S "/tmp/.X11-unix/X${number}" ]]; do
+until xset q >/dev/null 2>&1; do
     if [[ "${waited}" -ge 600 ]]; then
         echo "Timed out waiting for display ${DISPLAY}" >&2
         exit 1

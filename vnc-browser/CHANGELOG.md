@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.0
+
+- Fix screens after the first showing nothing. When several X servers start at
+  once some end up reachable only through an abstract socket, which never
+  appears in the filesystem. Readiness was tested by looking for
+  `/tmp/.X11-unix/X<n>`, so for those screens the browser and window manager
+  waited for a file that would never arrive, timed out after a minute and were
+  restarted, over and over. The display is now tested by connecting to it.
+
+  Only the first screen was reliably affected, so a single-screen setup worked
+  and the fault showed up as a blank screen on every screen beyond it.
+
 ## 0.1.0
 
 Initial release.
