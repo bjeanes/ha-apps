@@ -10,32 +10,114 @@ on:
   schedule:
     - cron: "0 0 * * *"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   find:
-    name: Find add-ons
+    name: Find apps
     runs-on: ubuntu-latest
     outputs:
-      addons: ${{ steps.addons.outputs.addons_list }}
+      apps: ${{ steps.apps.outputs.addons_list }}
     steps:
       - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v3.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: 🔍 Find add-on directories
-        id: addons
+      # Still named find-addons upstream; it returns the app directories.
+      - name: 🔍 Find app directories
+        id: apps
         uses: home-assistant/actions/helpers/find-addons@master
 
-  lint:
-    name: Lint add-on ${{ matrix.path }}
+  lint-app:
+    name: Lint app ${{ matrix.path }}
     runs-on: ubuntu-latest
     needs: find
     strategy:
+      fail-fast: false
       matrix:
-        path: ${{ fromJson(needs.find.outputs.addons) }}
+        path: ${{ fromJson(needs.find.outputs.apps) }}
     steps:
       - name: ⤵️ Check out code from GitHub
-        uses: actions/checkout@v3.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: 🚀 Run Home Assistant Add-on Lint
-        uses: frenck/action-addon-linter@v2.8
+      - name: 🚀 Run Home Assistant App Lint
+        uses: frenck/action-addon-linter@f995494fd84fae6310d23617e66d0e37de4f14eb # v2.21.0
         with:
           path: "./${{ matrix.path }}"
+
+  lint-hadolint:
+    name: Hadolint ${{ matrix.path }}
+    runs-on: ubuntu-latest
+    needs: find
+    strategy:
+      fail-fast: false
+      matrix:
+        path: ${{ fromJson(needs.find.outputs.apps) }}
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 🚀 Run Hadolint
+        uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
+        with:
+          dockerfile: "./${{ matrix.path }}/Dockerfile"
+
+  lint-shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 🚀 Run Shellcheck
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # 2.0.0
+        env:
+          # bashio and s6 helpers are not resolvable at lint time.
+          SHELLCHECK_OPTS: -e SC1091
+
+  lint-yamllint:
+    name: YAMLLint
+    runs-on: ubuntu-latest
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 🚀 Run YAMLLint
+        uses: frenck/action-yamllint@34b4bbcaeabedcfefad6adea8c5bbc42af0e2d47 # v1.5.0
+
+  lint-image-key:
+    name: App image key present
+    runs-on: ubuntu-latest
+    needs: find
+    steps:
+      - name: ⤵️ Check out code from GitHub
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Supervisor builds an app from source when config.yaml has no "image"
+      # key, which is exactly what you want while developing in the
+      # devcontainer, and exactly what you do not want on main: published apps
+      # must pull a prebuilt image. This catches a commented-out image key
+      # before it ships.
+      - name: 🔍 Check every app declares an image
+        env:
+          APPS: ${{ needs.find.outputs.apps }}
+        run: |
+          missing=()
+          for app in $(jq -r '.[]' <<< "${APPS}"); do
+            if ! grep -qE '^image:[[:space:]]*\S' "${app}/config.yaml"; then
+              missing+=("${app}")
+            fi
+          done
+
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            echo "::error::Missing 'image:' in config.yaml for: ${missing[*]}"
+            echo "Uncomment the image key before merging; without it Supervisor"
+            echo "builds the app from source on every user's machine."
+            exit 1
+          fi
+
+          echo "All apps declare an image."

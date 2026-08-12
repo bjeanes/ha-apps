@@ -1,17 +1,17 @@
-# Home Assistant Add-on: pgweb
+# Home Assistant App: pgweb
 
-_Example add-on to use as a blueprint for new add-ons._
+_Web-based PostgreSQL database browser, for inspecting the database behind your
+Home Assistant recorder (or any other Postgres you can reach)._
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
 
-<!-- ![Supports armhf Architecture][armhf-shield]
-![Supports armv7 Architecture][armv7-shield] -->
+## Installation
 
-![Supports i386 Architecture][i386-shield]
+1. Add this repository to your Home Assistant app store.
+2. Install the "pgweb" app.
+3. Set the `db` option to your database URL (see [DOCS.md](DOCS.md)).
+4. Start the app and open its Web UI.
 
 [aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
 [amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
-[armhf-shield]: https://img.shields.io/badge/armhf-yes-green.svg
-[armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg
-[i386-shield]: https://img.shields.io/badge/i386-yes-green.svg

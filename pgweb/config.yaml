@@ -1,15 +1,12 @@
-# https://developers.home-assistant.io/docs/add-ons/configuration#add-on-config
+# https://developers.home-assistant.io/docs/apps/configuration#app-configuration
 name: pgweb
-version: "0.1.0"
+version: "0.2.0"
 slug: pgweb
-description: pgweb
-url: "https://github.com/bjeanes/hassio-addons/tree/main/pgweb"
+description: Web-based PostgreSQL database browser
+url: "https://github.com/bjeanes/ha-apps/tree/main/pgweb"
 arch:
-  # - armhf
-  # - armv7
   - aarch64
   - amd64
-  - i386
 init: false
 ingress: true
 ingress_port: 8081
@@ -19,4 +16,4 @@ options:
   db: "postgresql://postgres:homeassistant@77b2833f-timescaledb/homeassistant?sslmode=disable"
 schema:
   db: "url"
-image: "ghcr.io/bjeanes/hassio-addon-pgweb-{arch}"
+image: "ghcr.io/bjeanes/ha-app-pgweb"

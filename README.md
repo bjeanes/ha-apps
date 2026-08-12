@@ -1,44 +1,62 @@
-# bjeanes' Home Assistant add-on repository
+# bjeanes' Home Assistant app repository
 
-Add-on documentation: <https://developers.home-assistant.io/docs/add-ons>
+App documentation: <https://developers.home-assistant.io/docs/apps>
 
-[![Open your Home Assistant instance and show the add add-on repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbjeanes%2Fhassio-addons)
+> Home Assistant renamed "add-ons" to "apps". This repository followed suit: it
+> was previously `bjeanes/hassio-addons`, and everything here that used to be
+> called an add-on is now called an app. GitHub redirects the old URL, so a
+> Home Assistant instance that added the repository under its former name keeps
+> working.
 
-## Add-ons
+[![Open your Home Assistant instance and show the add app repository dialog with a specific repository URL pre-filled.](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fbjeanes%2Fha-apps)
 
-This repository contains the following add-ons
+## Apps
+
+This repository contains the following apps.
 
 ### [pgweb](./pgweb)
+
+Web-based PostgreSQL database browser.
 
 ![Supports aarch64 Architecture][aarch64-shield]
 ![Supports amd64 Architecture][amd64-shield]
 
-<!-- ![Supports armhf Architecture][armhf-shield]
-![Supports armv7 Architecture][armv7-shield] -->
+## Development
 
-![Supports i386 Architecture][i386-shield]
+Open this repository in the devcontainer (VS Code will offer to). It runs a
+real Supervisor with this repository mounted as local apps, so you can install
+and iterate on an app without publishing anything.
 
-<!--
+The tasks in `.vscode/tasks.json` drive the loop:
 
-Notes to developers after forking or using the github template feature:
-- While developing comment out the 'image' key from 'example/config.yaml' to make the supervisor build the addon
-  - Remember to put this back when pushing up your changes.
-- When you merge to the 'main' branch of your repository a new build will be triggered.
-  - Make sure you adjust the 'version' key in 'example/config.yaml' when you do that.
+1. **Start Home Assistant** — boots Supervisor and Home Assistant
+2. **Install App** — installs the local copy of an app
+3. **Rebuild and Start App** — rebuilds from your working tree and tails the log
 
-  - Make sure you update 'example/CHANGELOG.md' when you do that.
-  - The first time this runs you might need to adjust the image configuration on github container registry to make it public
-- Adjust the 'image' key in 'example/config.yaml' so it points to your username instead of 'home-assistant'.
-  - This is where the build images will be published to.
-- Rename the example directory.
-  - The 'slug' key in 'example/config.yaml' should match the directory name.
-- Adjust all keys/url's that points to 'home-assistant' to now point to your user/fork.
-- Share your repository on the forums https://community.home-assistant.io/c/projects/9
-- Do awesome stuff!
- -->
+Home Assistant is then on <http://localhost:7123>.
+
+### The `image` key
+
+Supervisor only builds an app from source when its `config.yaml` has **no**
+`image:` key; when the key is present it pulls the published image instead. So
+while developing an app locally, comment `image:` out, or your changes will
+appear to do nothing.
+
+Uncomment it again before committing. CI fails if an app on `main` is missing
+its `image:` key, so a commented-out line cannot ship by accident.
+
+### Releasing
+
+Bump the app's `version:` in its `config.yaml` and add a `CHANGELOG.md` entry.
+Merging to `main` builds and publishes the image, and Home Assistant offers the
+new version once that build finishes.
+
+**The first publish of a new image name needs one manual step.** GitHub creates
+the package as private, and Home Assistant pulls anonymously, so the update
+fails until you make it public: GitHub → Packages → the package → Package
+settings → Change visibility → Public (or link it to this repository and
+inherit its visibility). This applies once per image name, not once per
+release.
 
 [aarch64-shield]: https://img.shields.io/badge/aarch64-yes-green.svg
 [amd64-shield]: https://img.shields.io/badge/amd64-yes-green.svg
-[armhf-shield]: https://img.shields.io/badge/armhf-yes-green.svg
-[armv7-shield]: https://img.shields.io/badge/armv7-yes-green.svg
-[i386-shield]: https://img.shields.io/badge/i386-yes-green.svg

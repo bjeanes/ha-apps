@@ -1,0 +1,15 @@
+#!/command/with-contenv bashio
+# shellcheck shell=bash
+# ==============================================================================
+# Start pgweb
+# ==============================================================================
+declare db_url
+
+db_url=$(bashio::config 'db')
+bashio::log.debug "Database URL: ${db_url}"
+
+exec pgweb \
+  --url "${db_url}" \
+  --no-ssh \
+  --skip-open \
+  --bind 0.0.0.0
